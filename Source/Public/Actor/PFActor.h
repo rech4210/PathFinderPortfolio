@@ -4,39 +4,19 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "PathFinder/PFCustomPathFinder.h"
 #include "PFActor.generated.h"
 
+class APFNode;
+class APFinder;
 
+// enum EPathfindingAlgorithm;
 UCLASS()
 class PATHFINDER_API APFActor : public AActor
 {
 	GENERATED_BODY()
-	
 public:
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
-	FVector3f StartVector;
-
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
-	FVector3f ArrivalVector;
-	
-	// Sets default values for this actor's properties
 	APFActor();
-	virtual void Tick(float DeltaTime) override;
-
-
-	// UFUNCTION(BlueprintCallable)
-	// void FindPath(FVector3f current, FVector3f arrival) const;
 	
-	// UFUNCTION(BlueprintCallable)
-	// void SetPath(FVector3f start, FVector3f arrival) const;
-
-protected:
-	UPROPERTY(EditAnywhere,BlueprintReadWrite)
-	TObjectPtr<UPFCustomPathFinder> PathFinder;
-	
-private:
 	UPROPERTY()
-	FVector3f Current;
-
+	TObjectPtr<APFNode> DestinationNode;
 };
