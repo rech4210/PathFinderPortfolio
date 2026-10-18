@@ -1,7 +1,17 @@
 # PathFinder
 
+| 항목 | 내용 |
+|:---|:---|
+| 한 줄 요약 | 노드 기반 탐색 영역을 구성하고 BFS, Dijkstra, A* 길찾기를 구현·비교한 프로젝트 |
+| 기간 | 2024.08 – 2024.11 |
+| 구성 | 개인 프로젝트 |
+| 스택 | Unreal Engine 5.3, C++, BFS/Dijkstra/A*, 메모리 프로파일링 도구 |
+| 한계 | 지형 변화가 잦은 경우 유연한 대응이 어려울 수 있음 |
+
+실행·재현: Unreal Engine 5.3에서 `PathFinder.uproject`를 열고 `APFinder`의 Blueprint 호출 함수로 `DrawGrid`와 길찾기 알고리즘을 실행한다.
+
 ## 선이 보이는 커스텀 길찾기 구현
-사용 기술 : 언리얼5.0, C++, (BFS,Dijkstra,A*), 메모리 프로파일링 도구
+사용 기술 : 언리얼5.3, C++, (BFS,Dijkstra,A*), 메모리 프로파일링 도구
 
 개인 프로젝트
 ![image](https://github.com/user-attachments/assets/dd832468-0477-451c-870b-a5c5a70ca771)
@@ -32,86 +42,11 @@ Navmesh 시스템은 레밸 내의 충돌 지오메트리 기반으로 다각형
 
 
 ### 언리얼 NavMesh의 스캔
-언리얼 NavMesh 생성은 `NavCollision`에 `FNavCollisionDataReader` 와 `FDerivedDataNavCollisionCooker` 로 구현된다.
-
-```cpp
-class FNavCollisionDataReader
-{
-public:
-	FNavCollisionConvex& TriMeshCollision;
-	FNavCollisionConvex& ConvexCollision;
-	TNavStatArray<int32>& ConvexShapeIndices;
-	FBox& Bounds;
-
-	FNavCollisionDataReader(//생성자){생성자}
-};
-```
-> FNavCollisionDataReader는 레벨 내 콜리전 정보를 저장하는 역할을 한다.
-> FDerivedDataNavCollisionCooker 는 저장된 콜리전 정보를 cook 시키는 역할을 한다.
-
-```cpp
-void UNavCollision::Setup(UBodySetup* BodySetup)
-{
-	BodySetupGuid = BodySetup->BodySetupGuid;
-
-	FByteBulkData* FormatData = GetCookedData(NAVCOLLISION_FORMAT);
-	if (!bForceGeometryRebuild && FormatData)
-	{
-		if (FormatData->IsLocked() == false)
-		{
-			// Create physics objects
-			FNavCollisionDataReader CookedDataReader(*FormatData, TriMeshCollision, ConvexCollision, ConvexShapeIndices, Bounds);
-			bHasConvexGeometry = true;
-		}
-	}
-	else if (FPlatformProperties::RequiresCookedData() == false)
-	{
-		GatherCollision();
-	}
-}
-```
-> Setup 함수를 통해 NavMesh 정보를 생성한다.
-> 
+언리얼 NavMesh는 레벨의 충돌 지오메트리를 바탕으로 경로 탐색용 내비게이션 메시를 구성한다. 세부 내용은 [언리얼 엔진 Navigation System 공식 문서](https://dev.epicgames.com/documentation/unreal-engine/navigation-system-in-unreal-engine?lang=en-US)를 참고한다.
 
 ### 언리얼 NavMesh의 공간 분할 방법 (옥트리 타일 분할)
 
-언리얼 NavMesh에 타일 공간분할을 위한 방법으로 Octree가 사용된다. 
-
-```cpp
-FNavigationOctree::FNavigationOctree(const FVector& Origin, FVector::FReal Radius)
-	: TOctree2<FNavigationOctreeElement, FNavigationOctreeSemantics>(Origin, Radius)
-	, DefaultGeometryGatheringMode(ENavDataGatheringMode::Instant)
-	, bGatherGeometry(false)
-	, NodesMemory(0)
-#if !UE_BUILD_SHIPPING	
-	, GatheringNavModifiersTimeLimitWarning(-1.0f)
-#endif // !UE_BUILD_SHIPPING	
-{
-	INC_DWORD_STAT_BY( STAT_NavigationMemory, sizeof(*this) );
-}
-```
-> 생성된 Octree는 NavigationOctreeController에 의해 제어된다.
-
-
-```cpp
-void FNavigationOctree::UpdateNode(const FOctreeElementId2& Id, const FBox& NewBounds)
-{
-	FNavigationOctreeElement ElementCopy = GetElementById(Id);
-	RemoveElement(Id);
-	ElementCopy.Bounds = NewBounds;
-	AddElement(ElementCopy);
-}
-
-void FNavigationOctree::RemoveNode(const FOctreeElementId2& Id)
-{
-	const FNavigationOctreeElement& Element = GetElementById(Id);
-	const int32 ElementMemory = Element.GetAllocatedSize();
-	NodesMemory -= ElementMemory;
-	DEC_MEMORY_STAT_BY(STAT_Navigation_CollisionTreeMemory, ElementMemory);
-
-	RemoveElement(Id);
-}
-```
+언리얼 Navigation System의 `FNavigationOctree`는 옥트리로 요소를 관리하고 추가·갱신·삭제 기능을 제공한다. 자세한 내용은 [FNavigationOctree 공식 API 문서](https://dev.epicgames.com/documentation/unreal-engine/API/Runtime/NavigationSystem/FNavigationOctree)를 참고한다.
 
 NavMesh에서는 충돌 콜리전 데이터를 기반으로 스캔 mesh를 생성한다. 해당 mesh는 bake 되는 과정이 필요하므로 런타임 내 성능이 높으나 bake 시간이 필요하게 되며 mesh의 동적 변화에 대응하기 어렵다.
 
@@ -200,12 +135,12 @@ void APFinder::DrawGrid() {
 	 > 길찾기 정확도를 위해 노드 밀집도를 고려하여야 했다. 밀집도는 메모리 사용량에 영향을 주며 탐색 횟수가 증가하기에 이에 대한 프로파일링이 필요했다.
 	 - ![25](https://github.com/user-attachments/assets/1f2e688d-2657-4db6-9148-25e2bb8c7e09)
 	 
-	노드 밀집도 25 : 메모리 6.38kb
+	노드 밀집도 25 : 메모리 6.38KB
 	 - ![40](https://github.com/user-attachments/assets/226cf574-499f-415a-ba30-04859c2fb9d5)
  
-	노드 밀집도 40 : 메모리 17.14kb
+	노드 밀집도 40 : 메모리 17.14KB
 
-	>밀집도에 따라 메모리가 약 2배 정도 차이나게된다. 해당 레벨에서는 밀집도 40까지의 정확도는 필요없다고 판단된다. 따라서 밀집도 25를 선택하기로 했다.
+	>README에 기록한 값 기준으로 밀집도 25는 6.38KB, 40은 17.14KB를 사용한다. 해당 레벨에서는 밀집도 40까지의 정확도는 필요없다고 판단된다. 따라서 밀집도 25를 선택하기로 했다.
 
 <br>
 
@@ -415,7 +350,7 @@ void APFinder::Dijkstra_Algorithm() {
 다만 다익스트라의 단점으로 음수 가중치 그래프는 작동하지 않는다는 점, 가중치 값을 추가로 저장하기에 메모리를 추가로 필요로한다는 것이다.
 
 ![image](https://github.com/user-attachments/assets/e1508528-e36c-44b6-b8db-ea114a3782b0)
-> 마지막에 표기된 숫자는 현재 노드가 가진 가중치의 값이다. 가중치 기준으로 길찾기 경로를 생성하며 항상 최상의 경로를 제공하진 않는다.
+> 마지막에 표기된 숫자는 현재 노드가 가진 가중치의 값이다. 음수 가중치가 없는 조건에서 다익스트라는 누적 가중치가 가장 낮은 경로를 찾는다.
 ![image](https://github.com/user-attachments/assets/52a75b43-5225-4c60-8fb3-ea4841e29767)
 >> 최적화 가중치 경로를 제공
 
@@ -424,7 +359,7 @@ void APFinder::Dijkstra_Algorithm() {
 ![Dijkstra 프로파일링](https://github.com/user-attachments/assets/7a5b9ab2-0a78-4ffe-b0f0-defd5fcc8236)
 > BFS에 가중치가 포함된 개념으로 모든 경로를 탐색하진 않기에 BFS보다 효율적이며 가중치를 기반으로 한 다양한 조건 길찾기 수행이 가능하다.
 
-BFS에 가중치 개념을 더한 Dijkstra는 우선순위에 따라 효율적 탐색이 가능하지만 이것이 최단거리탐색에 도움을 주진 못한다. 최단거리를 최적화한 방법을 사용하기위해선 A*를 사용해야한다.
+BFS와 달리 Dijkstra는 가중치를 반영하며, 음수 가중치가 없으면 누적 비용이 가장 낮은 경로를 찾는다. A*는 휴리스틱으로 목표 방향을 우선해 탐색 노드 수를 줄일 수 있다.
 
 ---
 
@@ -480,12 +415,12 @@ void APFinder::A_star_Algorithm() {
 A*는 휴리스틱 함수를 사용함에따라 최단거리 길찾기를 빠르게 수행가능하나, 이는 곧 휴리스틱 함수 의존도가 크다는것을 의미한다. A*의 사용 조건에 대응하는 적절한 휴리스틱을 설정하는것이 핵심이다.
 
 ![image](https://github.com/user-attachments/assets/413a8dca-a232-4786-bc49-ebd0e41d156e)
-> 휴리스틱을 사용한 최단거리 탐색을 보장한다. 
+> A*가 최단 경로를 보장하려면 휴리스틱이 실제 남은 비용을 과대평가하지 않아야 한다. 이 구현은 유클리드 거리를 사용하고 이동 비용은 노드의 `NodeCost`를 더하므로, 두 값의 단위가 맞지 않으면 최단 경로를 보장하지 않는다.
 
 ![Astar](https://github.com/user-attachments/assets/08c0ab82-3e9b-43c1-a700-255ae07fa7c5)
 > 휴리스틱을 이용해 최단거리를 탐색하므로, 이에 해당하지 않는 노드들은 탐색하지 않게 된다. 
 > 
-> 결과, 탐색속도가 빠르며 탐색된 경로 저장 메모리가 다른 알고리즘 대비 약 3배의 성능을 보인다
+> 탐색 경로 저장 메모리는 화면에 나타난 프로파일링 결과를 참고한다.
 
 A*는 추정잔여거리를 사용하기에 거리가 가까울수록 성능이 낮아지는 경우가 존재한다. 이러한 경우를 대비한 JPS를 사용하기도 한다. 길찾기에 보편적으로 A*를 사용하나 지형이 변경되는 경우가 많다면 유연한 대응이 어려울 것이다.
 
@@ -515,8 +450,6 @@ A*는 추정잔여거리를 사용하기에 거리가 가까울수록 성능이 
 
 - 언리얼의 `Navmesh` 기능에 타일 단위로 관리하여 메모리 사용과 성능을 최적화하고있다.  이처럼 레벨내 월드를 파티셔닝하여 부분적 관리한다면 성능을 최적화 할 수 있을것이다.
 
-### 개인적 소감: 
+### 개인적 소감:
 
-길찾기는 게임에서 필수적인 요소라 생각한다. RPG 장르에 큰 관심을 가지고 있기에 잘 만들어진 AI가 플레이어에게 주는 경험은 중요하다고 생각한다 (일부러 멍청한 AI를 만들어 난이도를 낮추기도 하니까). 그렇기에 미흡한 점도 눈에 띈다. 길찾기 기능을 구현하는데 초점에 맞춰 세부적인 부분을 놓친것 같기 때문이다.
-
-이번엔 게임의 요소중 하나인 길찾기 방법을 연구하였으며, 성능 향상과 프로파일링 경험은 큰 도움이 되었다. 이 경험을 토대로 멋진 게임을 만들수 있는 발판을 마련했다 생각한다. 마치 시뮬라르크처럼 현실의 복제본이 아닌 독자적인 특히 실제같은 RPG를 만들어보고 싶다.
+길찾기는 게임에서 중요한 기능이며, RPG의 AI가 플레이어에게 주는 경험에도 영향을 준다고 생각한다. 이번 구현에서 기능 구현에 집중하며 지형 변화 대응 등 세부적인 한계를 확인했다. 알고리즘 비교와 프로파일링 경험을 바탕으로 더 현실감 있는 RPG를 만드는 데 적용하고 싶다.
